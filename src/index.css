@@ -19,6 +19,34 @@
   color: #2c3e50;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  cursor: move;
+}
+
+.resize-handle {
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+  background-color: transparent;
+  z-index: 10;
+}
+
+.resize-handle:hover {
+  background-color: rgba(52, 152, 219, 0.2);
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 2px;
+  background-color: #3498db;
+  border-radius: 1px;
 }
 
 .component-ports {
@@ -27,6 +55,11 @@
   padding: 8px 0;
   position: relative;
   min-height: 30px;
+  pointer-events: none;
+}
+
+.component-ports > * {
+  pointer-events: all;
 }
 
 .port {
@@ -74,10 +107,24 @@
   box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
   min-width: 12px;
   min-height: 12px;
+  cursor: grab;
+}
+
+.react-flow__handle:active {
+  cursor: grabbing;
+  background: #3498db;
+  transform: scale(1.1);
 }
 
 .react-flow__handle:hover {
   background: #3498db;
+  transform: scale(1.1);
+}
+
+.react-flow__handle.dragging {
+  cursor: grabbing;
+  background: #3498db;
+  transform: scale(1.1);
 }
 
 .react-flow__handle.source {
@@ -212,25 +259,11 @@
 
 /* Add port labels */
 .react-flow__handle.source::after {
-  content: 'OUT';
-  position: absolute;
-  right: 15px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 10px;
-  color: #2c3e50;
-  font-weight: bold;
+  content: '';
 }
 
 .react-flow__handle.target::after {
-  content: 'IN';
-  position: absolute;
-  left: 15px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 10px;
-  color: #2c3e50;
-  font-weight: bold;
+  content: '';
 }
 
 /* Row labels */
@@ -284,4 +317,9 @@
 
 .react-flow__controls-zoom {
   display: none !important;
+}
+
+.port-label {
+  user-select: none;
+  pointer-events: none;
 } 

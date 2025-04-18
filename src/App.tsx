@@ -18,6 +18,15 @@ import ReactFlow, {
   NodeChange,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { ComponentLibrary } from './components/ComponentLibrary';
+import { ComponentEditor } from './components/ComponentEditor';
+import { ComponentNode } from './components/ComponentNode';
+import { ContextMenu } from './components/ContextMenu';
+import { ComponentType, ComponentTemplate, ComponentData } from './types';
+import { componentTypes } from './constants';
+import './styles/ComponentLibrary.css';
+import './styles/ComponentEditor.css';
+import './styles/ContextMenu.css';
 
 // Grid configuration
 const GRID_SIZE = 5; // 5px per grid unit
@@ -26,13 +35,6 @@ const GRID_HEIGHT = 35; // 35 rows
 const ROW_HEIGHT = 4; // 4 grid units per row
 const ROW_HEIGHT_PX = ROW_HEIGHT * GRID_SIZE; // 20px per row
 
-type ComponentType = 'input' | 'output' | 'power' | 'logic';
-
-interface ComponentData {
-  label: string;
-  type: ComponentType;
-}
-
 interface ComponentNodeData {
   data: ComponentData;
 }
@@ -40,53 +42,6 @@ interface ComponentNodeData {
 interface CustomEdgeData {
   edgeDraggable: boolean;
 }
-
-const componentTypes: Record<ComponentType, { inputs: number; outputs: number }> = {
-  input: {
-    inputs: 0,
-    outputs: 1,
-  },
-  output: {
-    inputs: 1,
-    outputs: 0,
-  },
-  power: {
-    inputs: 0,
-    outputs: 1,
-  },
-  logic: {
-    inputs: 2,
-    outputs: 1,
-  },
-};
-
-const ComponentNode = ({ data }: ComponentNodeData) => {
-  return (
-    <div className="component-node">
-      <div className="component-header">{data.label}</div>
-      <div className="component-ports">
-        {Array.from({ length: componentTypes[data.type].inputs }).map((_, i) => (
-          <Handle
-            key={`input-${i}`}
-            type="target"
-            position={Position.Left}
-            id={`input-${i}`}
-            style={{ left: 0 }}
-          />
-        ))}
-        {Array.from({ length: componentTypes[data.type].outputs }).map((_, i) => (
-          <Handle
-            key={`output-${i}`}
-            type="source"
-            position={Position.Right}
-            id={`output-${i}`}
-            style={{ right: 0 }}
-          />
-        ))}
-      </div>
-    </div>
-  );
-};
 
 const RowLabel = ({ rowNumber }: { rowNumber: number }) => {
   return (
@@ -105,13 +60,52 @@ const initialNodes: Node<ComponentData>[] = [
     id: '1',
     type: 'component',
     position: { x: 100, y: 100 },
-    data: { label: 'Power Supply', type: 'power' },
+    data: {
+      label: 'Power Supply',
+      type: 'power',
+      ports: {
+        inputs: [],
+        outputs: [{
+          id: 'output-default',
+          type: 'output',
+          label: 'Power',
+          position: 50
+        }],
+        power: []
+      }
+    },
   },
   {
     id: '2',
     type: 'component',
     position: { x: 400, y: 100 },
-    data: { label: 'Logic Gate', type: 'logic' },
+    data: {
+      label: 'Logic Gate',
+      type: 'logic',
+      ports: {
+        inputs: [
+          {
+            id: 'input-1',
+            type: 'input',
+            label: 'A',
+            position: 30
+          },
+          {
+            id: 'input-2',
+            type: 'input',
+            label: 'B',
+            position: 70
+          }
+        ],
+        outputs: [{
+          id: 'output-1',
+          type: 'output',
+          label: 'Q',
+          position: 50
+        }],
+        power: []
+      }
+    },
   },
 ];
 
@@ -123,6 +117,9 @@ interface HistoryState {
 }
 
 function App() {
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [editingComponent, setEditingComponent] = useState<Node | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node } | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [history, setHistory] = useState<HistoryState[]>([{ nodes: [...initialNodes], edges: [...initialEdges] }]);
@@ -131,59 +128,61 @@ function App() {
 
   // Add state to history when changes occur
   const addToHistory = useCallback((newNodes: Node[], newEdges: Edge[]) => {
-    console.log('Adding to history:', { newNodes, newEdges });
     setHistory(prev => {
       const newHistory = prev.slice(0, currentHistoryIndex + 1);
-      const newState = { 
-        nodes: JSON.parse(JSON.stringify(newNodes)), 
-        edges: JSON.parse(JSON.stringify(newEdges)) 
+      
+      // Create a proper deep copy of the new state
+      const newState = {
+        nodes: newNodes.map(node => ({
+          ...node,
+          position: { ...node.position },
+          data: { ...node.data }
+        })),
+        edges: newEdges.map(edge => ({
+          ...edge,
+          data: edge.data ? { ...edge.data } : undefined
+        }))
       };
-      return [...newHistory, newState];
+      
+      // Only add to history if the state is different from the last one
+      const lastState = newHistory[newHistory.length - 1];
+      if (!lastState || JSON.stringify(lastState) !== JSON.stringify(newState)) {
+        const updatedHistory = [...newHistory, newState];
+        setCurrentHistoryIndex(currentHistoryIndex + 1);
+        return updatedHistory;
+      }
+      return prev;
     });
-    setCurrentHistoryIndex(prev => prev + 1);
   }, [currentHistoryIndex]);
 
   // Handle node changes with history
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    let shouldAddToHistory = false;
-    
-    // Process all changes first
     onNodesChange(changes);
     
-    // Then check if we should add to history
-    changes.forEach((change) => {
-      if (change.type === 'position') {
-        if (change.dragging === false) { // Only when drag ends
-          shouldAddToHistory = true;
-        }
-      } else {
-        shouldAddToHistory = true;
-      }
-    });
+    const shouldAddToHistory = changes.some(change => 
+      change.type !== 'position' || (change.type === 'position' && !change.dragging)
+    );
 
     if (shouldAddToHistory) {
-      // Use setTimeout to ensure we get the latest state
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         setNodes(currentNodes => {
           addToHistory(currentNodes, edges);
           return currentNodes;
         });
-      }, 0);
+      });
     }
   }, [onNodesChange, edges, addToHistory, setNodes]);
 
   // Handle edge changes with history
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
     onEdgesChange(changes);
-    
-    // Add to history for edge changes (creation, deletion, etc.)
-    setTimeout(() => {
+    requestAnimationFrame(() => {
       setEdges(currentEdges => {
         addToHistory(nodes, currentEdges);
         return currentEdges;
       });
-    }, 0);
-  }, [onEdgesChange, nodes, addToHistory]);
+    });
+  }, [onEdgesChange, nodes, addToHistory, setEdges]);
 
   const onEdgeUpdate = useCallback((oldEdge: Edge, newConnection: Connection) => {
     setEdges((els) => updateEdge(oldEdge, newConnection, els));
@@ -226,10 +225,9 @@ function App() {
             eds
           );
           
-          // Use setTimeout to ensure we get the latest state
-          setTimeout(() => {
+          requestAnimationFrame(() => {
             addToHistory(nodes, newEdges);
-          }, 0);
+          });
           
           return newEdges;
         });
@@ -240,18 +238,21 @@ function App() {
 
   // Undo function
   const undo = useCallback(() => {
-    console.log('Current history index:', currentHistoryIndex);
-    console.log('History:', history);
-    
     if (currentHistoryIndex > 0) {
       const newIndex = currentHistoryIndex - 1;
       const previousState = history[newIndex];
       
-      console.log('Restoring to state:', previousState);
-      
       if (previousState) {
-        const restoredNodes = JSON.parse(JSON.stringify(previousState.nodes));
-        const restoredEdges = JSON.parse(JSON.stringify(previousState.edges));
+        // Create proper deep copies to ensure state updates
+        const restoredNodes = previousState.nodes.map(node => ({
+          ...node,
+          position: { ...node.position },
+          data: { ...node.data }
+        }));
+        const restoredEdges = previousState.edges.map(edge => ({
+          ...edge,
+          data: edge.data ? { ...edge.data } : undefined
+        }));
         
         setNodes(restoredNodes);
         setEdges(restoredEdges);
@@ -265,9 +266,21 @@ function App() {
     if (currentHistoryIndex < history.length - 1) {
       const newIndex = currentHistoryIndex + 1;
       const nextState = history[newIndex];
+      
       if (nextState) {
-        setNodes([...nextState.nodes]);
-        setEdges([...nextState.edges]);
+        // Create proper deep copies to ensure state updates
+        const restoredNodes = nextState.nodes.map(node => ({
+          ...node,
+          position: { ...node.position },
+          data: { ...node.data }
+        }));
+        const restoredEdges = nextState.edges.map(edge => ({
+          ...edge,
+          data: edge.data ? { ...edge.data } : undefined
+        }));
+        
+        setNodes(restoredNodes);
+        setEdges(restoredEdges);
         setCurrentHistoryIndex(newIndex);
       }
     }
@@ -295,23 +308,186 @@ function App() {
     };
   }, [undo, redo]);
 
+  const handleAddComponent = (component: ComponentTemplate) => {
+    const defaultPorts = {
+      inputs: Array.from({ length: componentTypes[component.type].inputs }, (_, i) => ({
+        id: `input-${i + 1}`,
+        type: 'input' as const,
+        label: String.fromCharCode(65 + i), // A, B, C, etc.
+        position: (i + 1) * (100 / (componentTypes[component.type].inputs + 1))
+      })),
+      outputs: Array.from({ length: componentTypes[component.type].outputs }, (_, i) => ({
+        id: `output-${i + 1}`,
+        type: 'output' as const,
+        label: i === 0 ? 'Q' : `Q${i + 1}`, // Q, Q2, Q3, etc.
+        position: 50
+      })),
+      power: []
+    };
+
+    const newNode: Node<ComponentData> = {
+      id: `${component.type}-${Date.now()}`,
+      type: 'component',
+      position: { x: 100, y: 100 },
+      data: {
+        label: component.label,
+        type: component.type,
+        ports: defaultPorts
+      }
+    };
+
+    setNodes(nodes => [...nodes, newNode]);
+    setShowLibrary(false);
+  };
+
+  const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    event.preventDefault();
+    // Ensure we pass the complete node data including ports
+    const nodeWithPorts = nodes.find(n => n.id === node.id);
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      node: nodeWithPorts || node
+    });
+  }, [nodes]);
+
+  // Add port position update handler
+  useEffect(() => {
+    const handlePortPositionUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { portId, position } = customEvent.detail;
+      
+      setNodes(nodes => nodes.map(node => {
+        const ports = node.data.ports;
+        if (!ports) return node;
+
+        // Find which port array contains this port
+        let portType: 'inputs' | 'outputs' | 'power' | null = null;
+        if (ports.inputs.some(p => p.id === portId)) portType = 'inputs';
+        else if (ports.outputs.some(p => p.id === portId)) portType = 'outputs';
+        else if (ports.power.some(p => p.id === portId)) portType = 'power';
+
+        if (!portType) return node;
+
+        // Update the port position
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            ports: {
+              ...ports,
+              [portType]: ports[portType].map(p =>
+                p.id === portId ? { ...p, position } : p
+              )
+            }
+          }
+        };
+      }));
+    };
+
+    window.addEventListener('portPositionUpdate', handlePortPositionUpdate as EventListener);
+    return () => {
+      window.removeEventListener('portPositionUpdate', handlePortPositionUpdate as EventListener);
+    };
+  }, [setNodes]);
+
+  // Add component resize handler
+  useEffect(() => {
+    const handleComponentResize = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { nodeId, height } = customEvent.detail;
+      
+      setNodes(nodes => nodes.map(node => 
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                height
+              }
+            }
+          : node
+      ));
+    };
+
+    window.addEventListener('componentResize', handleComponentResize as EventListener);
+    return () => {
+      window.removeEventListener('componentResize', handleComponentResize as EventListener);
+    };
+  }, [setNodes]);
+
+  const handleSaveComponent = useCallback((id: string, data: ComponentData, ports: any) => {
+    // Adjust port positions to be 8 grid rows apart
+    const adjustPortPositions = (portList: any[]) => {
+      return portList.map((port, index) => ({
+        ...port,
+        position: (index * 8 * ROW_HEIGHT_PX / (ROW_HEIGHT_PX * GRID_HEIGHT)) * 100
+      }));
+    };
+
+    const adjustedPorts = {
+      inputs: adjustPortPositions(ports.inputs),
+      outputs: adjustPortPositions(ports.outputs),
+      power: adjustPortPositions(ports.power)
+    };
+
+    setNodes(nodes => nodes.map(node => 
+      node.id === id 
+        ? {
+            ...node,
+            data: {
+              ...data,
+              ports: adjustedPorts
+            }
+          }
+        : node
+    ));
+    setEditingComponent(null);
+  }, [setNodes]);
+
+  if (showLibrary) {
+    return (
+      <ComponentLibrary
+        onBack={() => setShowLibrary(false)}
+        onAddComponent={handleAddComponent}
+      />
+    );
+  }
+
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-      <div style={{ 
-        width: `${GRID_WIDTH * GRID_SIZE}px`,
-        height: `${GRID_HEIGHT * ROW_HEIGHT_PX}px`,
-        margin: '0 auto',
-        border: '2px solid #2c3e50',
-        position: 'relative',
-        overflow: 'hidden',
-        background: '#ffffff'
-      }}>
+      <div 
+        className={editingComponent ? 'editor-active' : ''}
+        style={{ 
+          width: `${GRID_WIDTH * GRID_SIZE}px`,
+          height: `${GRID_HEIGHT * ROW_HEIGHT_PX}px`,
+          margin: '0 auto',
+          border: '2px solid #2c3e50',
+          position: 'relative',
+          overflow: 'hidden',
+          background: '#ffffff'
+        }}
+      >
         <div className="row-labels">
           {Array.from({ length: GRID_HEIGHT }, (_, i) => (
             <RowLabel key={i} rowNumber={i + 1} />
           ))}
         </div>
         <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 5 }}>
+          <button 
+            onClick={() => setShowLibrary(true)}
+            style={{
+              marginRight: '5px',
+              padding: '5px 10px',
+              background: '#2c3e50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Component Library
+          </button>
           <button 
             onClick={undo} 
             disabled={currentHistoryIndex === 0}
@@ -352,6 +528,7 @@ function App() {
           onEdgeUpdate={onEdgeUpdate}
           onConnect={onConnect}
           nodeTypes={nodeTypes}
+          onNodeContextMenu={handleNodeContextMenu}
           fitView={false}
           snapToGrid={true}
           snapGrid={[GRID_SIZE, GRID_SIZE]}
@@ -365,6 +542,8 @@ function App() {
           elementsSelectable={true}
           edgeUpdaterRadius={10}
           nodesDraggable={true}
+          noDragClassName="no-drag"
+          nodeDragThreshold={1}
         >
           <Background 
             variant={BackgroundVariant.Dots} 
@@ -374,6 +553,26 @@ function App() {
           />
           <Controls showZoom={false} />
         </ReactFlow>
+
+        {contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            onEdit={() => {
+              setEditingComponent(contextMenu.node);
+              setContextMenu(null);
+            }}
+            onClose={() => setContextMenu(null)}
+          />
+        )}
+
+        {editingComponent && (
+          <ComponentEditor
+            component={editingComponent}
+            onClose={() => setEditingComponent(null)}
+            onSave={handleSaveComponent}
+          />
+        )}
       </div>
     </div>
   );
